@@ -1327,12 +1327,8 @@ function check1p3pSwitching() {
  * Return the current for 1 phase to switch to 3 phases charging (lower when only 2 phases in effect for charging)
  * @returns {number} current from which to switch to 3p in mA
  */
-function getCurrentForSwitchTo3p() {
-    let currentForSwitchTo3p
-    currentForSwitchTo3p = getMinCurrent() * get1p3pPhases() * 1.10;
-    adapter.log.warn('currentForSwitchTo3p: ' + currentForSwitchTo3p);
-    
-    return currentForSwitchTo3p;
+function getCurrentForSwitchTo3p() {  
+    return  getMinCurrent() * get1p3pPhases() * 1.10;
 }
 
 /**
@@ -1674,6 +1670,8 @@ function checkWallboxPower() {
             const chargeTimestamp = getStateAsDate(stateChargeTimestamp);
             const Sw1p3pTimestamp = getStateAsDate(state1p3pSwTimestamp);
             const regardTimestamp = getStateAsDate(stateRegardTimestamp);
+            
+            adapter.log.warn('currentForSwitchTo3p: ' + getCurrentForSwitchTo3p());
 
             if (has1P3PAutomatic()) {
                 const currWith1p = getAmperage(available, 1);
