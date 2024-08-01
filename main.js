@@ -1328,9 +1328,9 @@ function check1p3pSwitching() {
  * @returns {number} current from which to switch to 3p in mA
  */
 function getCurrentForSwitchTo3p() {  
-    adapter.log.warn('getMinCurrent: ' + getMinCurrent());
-    adapter.log.warn('get1p3pPhases: ' + get1p3pPhases());
-    return  getMinCurrent() * get1p3pPhases() * 1.10;
+    adapter.log.info('getMinCurrent: ' + getMinCurrent());
+    adapter.log.info('get1p3pPhases: ' + get1p3pPhases());
+    return  getMinCurrent() * get1p3pPhases() * 1.35;  //ori 1,10
 }
 
 /**
@@ -1673,7 +1673,7 @@ function checkWallboxPower() {
             const Sw1p3pTimestamp = getStateAsDate(state1p3pSwTimestamp);
             const regardTimestamp = getStateAsDate(stateRegardTimestamp);
             
-            adapter.log.warn('currentForSwitchTo3p: ' + getCurrentForSwitchTo3p());
+            adapter.log.info('currentForSwitchTo3p: ' + getCurrentForSwitchTo3p());
 
             if (has1P3PAutomatic()) {
                 const currWith1p = getAmperage(available, 1);
