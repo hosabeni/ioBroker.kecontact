@@ -1328,6 +1328,8 @@ function check1p3pSwitching() {
  * @returns {number} current from which to switch to 3p in mA
  */
 function getCurrentForSwitchTo3p() {  
+    adapter.log.warn('getMinCurrent: ' + getMinCurrent());
+    adapter.log.warn('get1p3pPhases: ' + get1p3pPhases());
     return  getMinCurrent() * get1p3pPhases() * 1.10;
 }
 
