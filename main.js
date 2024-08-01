@@ -1330,7 +1330,7 @@ function check1p3pSwitching() {
 function getCurrentForSwitchTo3p() {
     let currentForSwitchTo3p
     currentForSwitchTo3p = getMinCurrent() * get1p3pPhases() * 1.10;
-    adapter.log.error('currentForSwitchTo3p: ' + currentForSwitchTo3p);
+    adapter.log.warn('currentForSwitchTo3p: ' + currentForSwitchTo3p);
     
     return currentForSwitchTo3p;
 }
