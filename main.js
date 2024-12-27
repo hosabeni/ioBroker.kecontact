@@ -64,6 +64,7 @@ let wallboxIncluded      = true;   // amperage of wallbox include in energy mete
 let amperageDelta        = 500;    // default for step of amperage
 let underusage           = 0;      // maximum regard use to reach minimal charge power for vehicle
 const minAmperageDefault = 6000;   // default minimum amperage to start charging session
+const maxCurrentEnWG     = 6000;   // maximum current allowed when limitation of §14a EnWg is active
 let minAmperage          = 5000;   // minimum amperage to start charging session
 let minChargeSeconds     = 0;      // minimum of charge time even when surplus is not sufficient
 let minRegardSeconds     = 0;      // maximum time to accept regard when charging
@@ -89,6 +90,8 @@ const regexCurrFirmware  = /P30 v\s+((?:.)*?)\s+\(/gi;
 const stateWallboxEnabled      = 'enableUser';                  /*Enable User*/
 const stateWallboxCurrent      = 'currentUser';                 /*Current User*/
 const stateWallboxMaxCurrent   = 'currentHardware';             /*Maximum Current Hardware*/
+const stateWallboxCurrentWithTimer = 'currentTimer';            /*Current value for currTime */
+const stateTimeForCurrentChange = 'timeoutCurrentTimer';        /*Timer value for currTime */
 const stateWallboxPhase1       = 'i1';                          /*Current 1*/
 const stateWallboxPhase2       = 'i2';                          /*Current 2*/
 const stateWallboxPhase3       = 'i3';                          /*Current 3*/
@@ -122,6 +125,7 @@ const stateWallboxDisabled     = 'automatic.pauseWallbox';      /*switch to gene
 const statePvAutomatic         = 'automatic.photovoltaics';     /*switch to charge vehicle in regard to surplus of photovoltaics (false= charge with max available power) */
 const stateAddPower            = 'automatic.addPower';          /*additional regard to run charging session*/
 const stateLimitCurrent        = 'automatic.limitCurrent';      /*maximum amperage for charging*/
+const stateLimitCurrent1p      = 'automatic.limitCurrent1p';    /*maximum amperage for charging when 1p 3p switch set to 1p */
 const stateManualPhases        = 'automatic.calcPhases';        /*count of phases to calculate with for KeContact Deutschland-Edition*/
 const stateBatteryStrategy     = 'automatic.batteryStorageStrategy'; /*strategy to use for battery storage dynamically*/
 const stateMinimumSoCOfBatteryStorage = 'automatic.batterySoCForCharging'; /*SoC above which battery storage may be used for charging vehicle*/
@@ -238,6 +242,8 @@ function onAdapterUnload(callback) {
             adapter.unsubscribeForeignStates(adapter.config.stateEnergyMeter2);
         if (isForeignStateSpecified(adapter.config.stateEnergyMeter3))
             adapter.unsubscribeForeignStates(adapter.config.stateEnergyMeter3);
+        if (isForeignStateSpecified(adapter.config.stateEnWG))
+            adapter.unsubscribeForeignStates(adapter.config.stateEnWG);
 
     } catch (e) {
         if (adapter.log)   // got an exception 'TypeError: Cannot read property 'warn' of undefined'
@@ -246,6 +252,7 @@ function onAdapterUnload(callback) {
 
     callback();
 }
+
 /**
  * Function is called if a subscribed state changes
  * @param {string} id is the id of the state which changed
@@ -384,6 +391,8 @@ async function main() {
     adapter.log.info('config underusage: ' + adapter.config.underusage);
     adapter.log.info('config minTime: ' + adapter.config.minTime);
     adapter.log.info('config regardTime: ' + adapter.config.regardTime);
+    adapter.log.info('config stateEnWG: ' + adapter.config.stateEnWG);
+    adapter.log.info('config dynamicEnWG: ' + adapter.config.dynamicEnWG);
     adapter.log.info('config maxPower: ' + adapter.config.maxPower);
     adapter.log.info('config stateEnergyMeter1: ' + adapter.config.stateEnergyMeter1);
     adapter.log.info('config stateEnergyMeter2: ' + adapter.config.stateEnergyMeter2);
@@ -521,17 +530,23 @@ async function main() {
 function start() {
     adapter.subscribeStates('*');
 
-    stateChangeListeners[adapter.namespace + '.' + stateWallboxEnabled] = function (oldValue, newValue) {
+    stateChangeListeners[adapter.namespace + '.' + stateWallboxEnabled] = function (_oldValue, newValue) {
         sendUdpDatagram('ena ' + (newValue ? 1 : 0), true);
     };
-    stateChangeListeners[adapter.namespace + '.' + stateWallboxCurrent] = function (oldValue, newValue) {
-        //sendUdpDatagram('currtime ' + parseInt(newValue) + ' 1', true);
+    stateChangeListeners[adapter.namespace + '.' + stateWallboxCurrent] = function (_oldValue, newValue) {
         sendUdpDatagram('curr ' + parseInt(newValue), true);
     };
-    stateChangeListeners[adapter.namespace + '.' + stateWallboxOutput] = function (oldValue, newValue) {
+    stateChangeListeners[adapter.namespace + '.' + stateWallboxCurrentWithTimer] = function (_oldValue, newValue) {
+        sendUdpDatagram('currtime ' + parseInt(newValue) + ' ' + getStateDefault0(stateTimeForCurrentChange), true);
+    };
+    stateChangeListeners[adapter.namespace + '.' + stateTimeForCurrentChange] = function () {
+        // parameters (oldValue, newValue) can be ommited if not needed
+        // no real action to do
+    };
+    stateChangeListeners[adapter.namespace + '.' + stateWallboxOutput] = function (_oldValue, newValue) {
         sendUdpDatagram('output ' + (newValue ? 1 : 0), true);
     };
-    stateChangeListeners[adapter.namespace + '.' + stateWallboxDisplay] = function (oldValue, newValue) {
+    stateChangeListeners[adapter.namespace + '.' + stateWallboxDisplay] = function (_oldValue, newValue) {
         if (newValue !== null) {
             if (typeof newValue == 'string') {
                 sendUdpDatagram('display 0 0 0 0 ' + newValue.replace(/ /g, '$'), true);
@@ -540,54 +555,64 @@ function start() {
             }
         }
     };
-    stateChangeListeners[adapter.namespace + '.' + stateWallboxDisabled] = function () {
-        // parameters (oldValue, newValue) can be ommited if not needed
+    stateChangeListeners[adapter.namespace + '.' + stateWallboxDisabled] = function (_oldValue, newValue) {
+        adapter.log.debug('set ' + stateWallboxDisabled + ' to ' + newValue);
         // no real action to do
     };
-    stateChangeListeners[adapter.namespace + '.' + statePvAutomatic] = function () {
+    stateChangeListeners[adapter.namespace + '.' + statePvAutomatic] = function (_oldValue, newValue) {
+        adapter.log.debug('set ' + statePvAutomatic + ' to ' + newValue);
         // no real action to do
     };
-    stateChangeListeners[adapter.namespace + '.' + stateSetEnergy] = function (oldValue, newValue) {
+    stateChangeListeners[adapter.namespace + '.' + stateSetEnergy] = function (_oldValue, newValue) {
         sendUdpDatagram('setenergy ' + parseInt(newValue) * 10, true);
     };
-    stateChangeListeners[adapter.namespace + '.' + stateReport] = function (oldValue, newValue) {
+    stateChangeListeners[adapter.namespace + '.' + stateReport] = function (_oldValue, newValue) {
         sendUdpDatagram('report ' + newValue, true);
     };
-    stateChangeListeners[adapter.namespace + '.' + stateStart] = function (oldValue, newValue) {
+    stateChangeListeners[adapter.namespace + '.' + stateStart] = function (_oldValue, newValue) {
         sendUdpDatagram('start ' + newValue, true);
     };
-    stateChangeListeners[adapter.namespace + '.' + stateStop] = function (oldValue, newValue) {
+    stateChangeListeners[adapter.namespace + '.' + stateStop] = function (_oldValue, newValue) {
         sendUdpDatagram('stop ' + newValue, true);
     };
-    stateChangeListeners[adapter.namespace + '.' + stateSetDateTime] = function (oldValue, newValue) {
+    stateChangeListeners[adapter.namespace + '.' + stateSetDateTime] = function (_oldValue, newValue) {
         sendUdpDatagram('setdatetime ' + newValue, true);
     };
     stateChangeListeners[adapter.namespace + '.' + stateUnlock] = function () {
         sendUdpDatagram('unlock', true);
     };
-    stateChangeListeners[adapter.namespace + '.' + stateX2Source] = function (oldValue, newValue) {
+    stateChangeListeners[adapter.namespace + '.' + stateX2Source] = function (_oldValue, newValue) {
         sendUdpDatagram('x2src ' + newValue, true);
     };
-    stateChangeListeners[adapter.namespace + '.' + stateX2Switch] = function (oldValue, newValue) {
+    stateChangeListeners[adapter.namespace + '.' + stateX2Switch] = function (_oldValue, newValue) {
         sendUdpDatagram('x2 ' + newValue, true);
         setStateAck(state1p3pSwTimestamp, new Date().toString());
     };
-    stateChangeListeners[adapter.namespace + '.' + stateAddPower] = function () {
+    stateChangeListeners[adapter.namespace + '.' + stateAddPower] = function (_oldValue, newValue) {
+        adapter.log.debug('set ' + stateAddPower + ' to ' + newValue);
         // no real action to do
     };
-    stateChangeListeners[adapter.namespace + '.' + stateManualPhases] = function () {
+    stateChangeListeners[adapter.namespace + '.' + stateManualPhases] = function (_oldValue, newValue) {
+        adapter.log.debug('set ' + stateManualPhases + ' to ' + newValue);
         // no real action to do
     };
-    stateChangeListeners[adapter.namespace + '.' + stateLimitCurrent] = function () {
+    stateChangeListeners[adapter.namespace + '.' + stateLimitCurrent] = function (_oldValue, newValue) {
+        adapter.log.debug('set ' + stateLimitCurrent + ' to ' + newValue);
         // no real action to do
     };
-    stateChangeListeners[adapter.namespace + '.' + stateBatteryStrategy] = function () {
+    stateChangeListeners[adapter.namespace + '.' + stateLimitCurrent1p] = function (_oldValue, newValue) {
+        adapter.log.debug('set ' + stateLimitCurrent1p + ' to ' + newValue);
         // no real action to do
     };
-    stateChangeListeners[adapter.namespace + '.' + stateMsgFromOtherwallbox] = function (oldValue, newValue) {
+    stateChangeListeners[adapter.namespace + '.' + stateBatteryStrategy] = function (_oldValue, newValue) {
+        adapter.log.debug('set ' + stateBatteryStrategy + ' to ' + newValue);
+        // no real action to do
+    };
+    stateChangeListeners[adapter.namespace + '.' + stateMsgFromOtherwallbox] = function (_oldValue, newValue) {
         handleWallboxExchange(newValue);
     };
-    stateChangeListeners[adapter.namespace + '.' + stateMinimumSoCOfBatteryStorage] = function (_oldValue, _newValue) {
+    stateChangeListeners[adapter.namespace + '.' + stateMinimumSoCOfBatteryStorage] = function (_oldValue, newValue) {
+        adapter.log.debug('set ' + stateMinimumSoCOfBatteryStorage + ' to ' + newValue);
         // no real action to do
     };
 
@@ -599,7 +624,7 @@ function start() {
 /**
  * Function which checks weahter the state given by the parameter is defined in the adapter.config page.
  * @param {string} stateValue is a string with the value of the state.
- * @returns {*} true if the tate is specified.
+ * @returns {*} true if the state is specified.
  */
 function isForeignStateSpecified(stateValue) {
     return stateValue && stateValue !== null && typeof stateValue == 'string' && stateValue !== '' && stateValue !== '[object Object]';
@@ -609,15 +634,15 @@ function isForeignStateSpecified(stateValue) {
 /**
  * Function calls addForeignState which subscribes a foreign state to write values
  * in 'currentStateValues'
- * @param {string} stateValue is a string with the value of the state.
+ * @param {string} stateName is a string with the name of the state.
  * @returns {boolean} returns true if the function addForeingnState was executed successful
  */
-function addForeignStateFromConfig(stateValue) {
-    if (isForeignStateSpecified(stateValue)) {
-        if (addForeignState(stateValue)) {
+function addForeignStateFromConfig(stateName) {
+    if (isForeignStateSpecified(stateName)) {
+        if (addForeignState(stateName)) {
             return true;
         } else {
-            adapter.log.error('Error when adding foreign state "' + stateValue + '"');
+            adapter.log.error('Error when adding foreign state "' + stateName + '"');
             return false;
         }
     }
@@ -643,13 +668,10 @@ function checkConfig() {
         if (everythingFine) {
             adapter.log.info('starting charging station in passive mode');
         }
-    }
-    if (isPassive) {
         if (adapter.config.pollInterval > 0) {
             intervalPassiveUpdate = getNumber(adapter.config.pollInterval) * 1000;
         }
     } else {
-        isPassive = false;
         if (everythingFine) {
             adapter.log.info('starting charging station in active mode');
         }
@@ -664,26 +686,6 @@ function checkConfig() {
     }
     if (photovoltaicsActive) {
         everythingFine = init1p3pSwitching(adapter.config.state1p3pSwitch) && everythingFine;
-        if (isX2PhaseSwitch()) {
-            if (isForeignStateSpecified(adapter.config.state1p3pSwitch)) {
-                everythingFine = false;
-                adapter.log.error('both, state for 1p/3p switch and switching via X2, must not be specified together');
-            }
-            const valueOn = 1;
-            const valueOff = 0;
-            valueFor1p3pOff = valueOff;
-            if (adapter.config['1p3pSwitchIsNO'] === true) {
-                valueFor1pCharging = valueOff;
-                valueFor3pCharging = valueOn;
-            } else {
-                valueFor1pCharging = valueOn;
-                valueFor3pCharging = valueOff;
-            }
-
-            min1p3pSwSec = 305;
-            adapter.log.info('Using min time between phase switching of: ' +min1p3pSwSec);
-        }
-
         everythingFine = addForeignStateFromConfig(adapter.config.stateBatteryCharging) && everythingFine;
         everythingFine = addForeignStateFromConfig(adapter.config.stateBatteryDischarging) && everythingFine;
         everythingFine = addForeignStateFromConfig(adapter.config.stateBatterySoC) && everythingFine;
@@ -727,6 +729,31 @@ function checkConfig() {
             minRegardSeconds = getNumber(adapter.config.regardTime);
         }
     }
+
+    if (isX2PhaseSwitch()) {
+        if (isForeignStateSpecified(adapter.config.state1p3pSwitch)) {
+            everythingFine = false;
+            adapter.log.error('both, state for 1p/3p switch and switching via X2, must not be specified together');
+        }
+        const valueOn = 1;
+        const valueOff = 0;
+        valueFor1p3pOff = valueOff;
+        if (adapter.config['1p3pSwitchIsNO'] === true) {
+            valueFor1pCharging = valueOff;
+            valueFor3pCharging = valueOn;
+        } else {
+            valueFor1pCharging = valueOn;
+            valueFor3pCharging = valueOff;
+        }
+
+        min1p3pSwSec = 305;
+        adapter.log.info('Using min time between phase switching of: ' +min1p3pSwSec);
+    }
+
+    if (isEnWGDefined()) {
+        everythingFine = addForeignStateFromConfig(adapter.config.stateEnWG) && everythingFine;
+    }
+
     if (adapter.config.maxPower && (adapter.config.maxPower != 0)) {
         maxPowerActive = true;
         if (adapter.config.maxPower <= 0) {
@@ -1032,7 +1059,7 @@ function isUsingBatteryForFullChargingOfVehicle() {
 
 /**
  * Get the minimum current for wallbox
- * @returns {number} the  minimum amperage to start charging session
+ * @returns {number} the  minimum amperage to start charging session in mA
  */
 function getMinCurrent() {
     return minAmperage;
@@ -1040,11 +1067,17 @@ function getMinCurrent() {
 
 /**
  * Get maximum current for wallbox (hardware defined by dip switch) min. of stateWallboxMaxCurrent an stateLimitCurrent
- * @returns {number} the  maxium allowed charging current
+ * @returns {number} the  maxium allowed charging current in mA
  */
 function getMaxCurrent() {
     let max = getStateDefault0(stateWallboxMaxCurrent);
-    const limit = getStateDefault0(stateLimitCurrent);
+    let limit = getStateDefault0(stateLimitCurrent);
+    if (has1P3PAutomatic() && isReducedChargingBecause1p3p()) {
+        const limit1p = getStateDefault0(stateLimitCurrent1p);
+        if (limit1p > 0) {
+            limit = limit1p;
+        }
+    }
     if ((limit > 0) && (limit < max)) {
         max = limit;
     }
@@ -1181,7 +1214,7 @@ function getBatteryStoragePower(isFullPowerRequested) {
  * The available surplus is calculated and returned not considering the used power for charging. If configured the availabe storage power is added.
  *
  * @param {boolean} isFullBatteryStoragePowerRequested if checked then maximum available power of the battery is added
- * @returns {number} the available surplus without considering the wallbox power currently used for charging.
+ * @returns {number} the available surplus without considering the wallbox power currently used for charging or negative value is case of regard.
  */
 function getSurplusWithoutWallbox(isFullBatteryStoragePowerRequested = false) {
     let power = getStateDefault0(adapter.config.stateSurplus) - getStateDefault0(adapter.config.stateRegard) + getBatteryStoragePower(isFullBatteryStoragePowerRequested);
@@ -1219,6 +1252,39 @@ function getTotalPowerAvailable() {
 }
 
 /**
+ * If the §14a EnWG is active calculate max current
+ * @returns the total current available in mA
+ */
+function getMaxCurrentEnWG() {
+    if (isEnWGDefined() && isEnWGActive()) {
+        if (adapter.config.dynamicEnWG == true) {
+            const allowedPower = 3 * voltage * maxCurrentEnWG / 1000;
+            return getAmperage(allowedPower + getSurplusWithoutWallbox(), get1p3pPhases());
+        } else {
+            return maxCurrentEnWG;
+        }
+    }
+    return -1;  // no value defined
+}
+
+/**
+ * Return, if a possible power limitation according to §14a EnWG was activated by the common carrier
+ * @returns true, if EnWG limitation is defined and active
+ */
+function isEnWGActive() {
+    const stateName = adapter.config.stateEnWG;
+    const value = getStateInternal(stateName);
+    if (typeof value == 'boolean') {
+        return value;
+    } else if (typeof value == 'number') {
+        return value > 0;
+    } else {
+        adapter.log.error('unhandled type ' + typeof value + ' for state ' + stateName);
+        return false;
+    }
+}
+
+/**
  * resets values for 1p/3p switching
  */
 function reset1p3pSwitching() {
@@ -1241,6 +1307,15 @@ function doNextStepOf1p3pSwitching() {
  */
 function isX2PhaseSwitch() {
     return adapter.config['1p3pViaX2'] == true;
+}
+
+/**
+ * Returns whether EnWG limitation is defined in config
+ * @returns true, if EnWG limiting is defined oin config
+ *
+ */
+function isEnWGDefined() {
+    return isForeignStateSpecified(adapter.config.stateEnWG);
 }
 
 /**
@@ -1628,6 +1703,14 @@ function checkWallboxPower() {
         const maxAmperage = getAmperage(maxPower, phases);
         if (tempMax > maxAmperage) {
             tempMax = maxAmperage;
+        }
+    }
+    // next check if limitation is active according to german for §14a EnWG
+    const maxCurrentEnWG = getMaxCurrentEnWG();
+    if (maxCurrentEnWG >= 0) {
+        if (maxCurrentEnWG < tempMax) {
+            tempMax = maxCurrentEnWG;
+            adapter.log.debug('Limit current to ' + maxCurrentEnWG + ' mA due to §14a EnWG');
         }
     }
 

@@ -78,6 +78,10 @@ In this case please enter the state for your installation contactor and whetheri
 If you own a battery storage please fill in the options here. By specifiying states for surplus and regard of your battery storage, this adapter can control whether
 battery storage should be used for charging your vehicle or not, depenent from the strategy preficied in the options.
 
+### german §14a EnWG power limitation
+
+Due to german §14a EnWG there's an option to limit charging station to max. 6A fix or dynamically to regard of 3x6A (4.140 watts)
+
 ### power limitation
 
 You can also limit max. power of your wallbox to limit main power. E.g. when running night-storage heaters you might have to respect a maximum power limitation.
@@ -106,6 +110,13 @@ To charge your vehicle with a constant amperage of 6A regardless of surplus, set
   Placeholder for the next version (at the beginning of the line):
   ### **WORK IN PROGRESS**
 -->
+### 2.3.0 (2024-11-29)
+* (Sneak-L8) new option to limit charging station according to german §14a EnWG
+* (Sneak-L8) enable currTime for manual use and X2 even in passive mode
+* (Sneak-L8) minimum verison für js-controller now 5.0.19
+* (Sneak-L8) set currTimer timeout default value from 0 to 1
+* (Sneak-L8) support new option "setBoot" of c-series stating firmware 3.10.57
+
 ### 2.2.0 (2024-06-23)
 * (mcm1957) Adapter requires nodejs >= 18 and js-controller >= 5 now.
 * (mcm1957) Dependencies have been updated.
@@ -127,9 +138,6 @@ To charge your vehicle with a constant amperage of 6A regardless of surplus, set
 * (chrisko) added minimum timer to switch between phases if 1p/3p charging is used.
 * (Sneak-L8) disable firmware check for c-series due to changes on webpage of Keba
 * (Sneak-L8) sometimes 1p/3p switch was not working correctly (repeatedly "stop charging fpr switch of phases...")
-
-### 2.0.1 (2023-07-10)
-* (Sneak-L8) support for Company Car Wall Box MID - GREEN EDITION (sentry IOBROKER-KECONTACT-1K & IOBROKER-KECONTACT-1N) and PV-Edition (sentry IOBROKER-KECONTACT-1M)
 
 ## Legal
 
